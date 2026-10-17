@@ -1,0 +1,4 @@
+# Additional dependencies for the DINOv3 backbone.
+# Install the original CoTMix dependencies separately as described by its README.
+transformers>=4.56.0
+torchvision
