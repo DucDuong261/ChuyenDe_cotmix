@@ -8,6 +8,7 @@ import os
 
 # Tăng giới hạn đệ quy để chống lỗi khi load mô hình pkl
 sys.setrecursionlimit(50000)
+torch.set_num_threads(1)
 
 sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 
