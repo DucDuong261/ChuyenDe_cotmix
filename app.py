@@ -11,7 +11,7 @@ sys.path.append(os.path.dirname(os.path.abspath(__file__)))
 device = torch.device("cpu")
 try:
     # Load file mô hình .pkl
-    model = torch.load("cotmix_uci_har.pkl", map_location=device)
+    model = torch.load("cotmix_uci_har.pkl", map_location=device, weights_only=False)
     model.eval()
     model_loaded = True
 except Exception as e:
