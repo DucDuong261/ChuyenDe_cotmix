@@ -8,7 +8,7 @@ ENV HOME=/home/user \
 WORKDIR $HOME/app
 
 # Cài đặt PyTorch bản CPU siêu nhẹ trước để chống tràn RAM
-RUN pip install torch --no-cache-dir --index-url https://download.pytorch.org/whl/cpu
+RUN pip install --upgrade pip && pip install torch --no-cache-dir --extra-index-url https://download.pytorch.org/whl/cpu
 
 # Cài các thư viện còn lại
 COPY --chown=user requirements.txt .
