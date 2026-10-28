@@ -4,7 +4,7 @@
     {
       "name": "phonepose",
       "runtimeExecutable": "C:\\Users\\Thich Minh Duc\\AppData\\Local\\Temp\\ppv\\Scripts\\python.exe",
-      "runtimeArgs": ["-u", "CoTMix/app.py"],
+      "runtimeArgs": ["-u", "app.py"],
       "port": 7860
     }
   ]
