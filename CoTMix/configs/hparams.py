@@ -26,6 +26,14 @@ class HAR():
             }
         }
 
+        # Chỉ áp dụng khi --backbone DINOv3ViTS16 (trainer gộp vào hparams), CNN không đổi.
+        # Chọn bằng thí nghiệm 1 epoch trên 5 kịch bản: acc 28.44 -> 38.78, F1 21.87 -> 29.76.
+        self.dinov3_overrides = {
+            'src_mix_cls_weight': 0.78,     # CE trên mẫu trộn nghiêng nguồn
+            'trg_div_weight': 0.3,          # diversity trên dự đoán đích
+            'trg_cont_warmup_epochs': 1,    # tắt trg_con trong epoch đầu
+        }
+
 
 class EEG():
     def __init__(self):

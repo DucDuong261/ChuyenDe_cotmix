@@ -53,6 +53,7 @@ def data_generator(data_path, domain_id, dataset_configs, hparams):
     train_loader = torch.utils.data.DataLoader(dataset=train_dataset, batch_size=batch_size,
                                                shuffle=True, drop_last=True, num_workers=0)
 
+    # Không bỏ batch cuối khi đánh giá: tập test mỗi người chỉ ~60 mẫu
     test_loader = torch.utils.data.DataLoader(dataset=test_dataset, batch_size=batch_size,
-                                              shuffle=False, drop_last=True, num_workers=0)
+                                              shuffle=False, drop_last=False, num_workers=0)
     return train_loader, test_loader

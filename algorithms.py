@@ -4,6 +4,7 @@ import numpy as np
 
 from models.models import classifier
 from models.loss import SupConLoss, ConditionalEntropyLoss, NTXentLoss
+from models.dinov3_loss import DINOv3LossAddons
 
 
 def get_algorithm_class(algorithm_name):
@@ -56,10 +57,14 @@ class CoTMix(Algorithm):
                 weight_decay=hparams["weight_decay"]
             )
         self.hparams = hparams
-        
+
         self.contrastive_loss = NTXentLoss(device, hparams["batch_size"], 0.2, True)
         self.entropy_loss = ConditionalEntropyLoss()
         self.sup_contrastive_loss = SupConLoss(device)
+
+        # Loss bổ sung cho DINOv3 (models/dinov3_loss.py); mặc định tắt nên CNN giữ nguyên.
+        self.dinov3_loss = DINOv3LossAddons.from_hparams(hparams)
+        self.current_epoch = 1  # trainer cập nhật trước mỗi epoch
 
     def update(self, src_x, src_y, trg_x):
 
@@ -115,10 +120,14 @@ class CoTMix(Algorithm):
         trg_dominant_feat = self.feature_extractor(trg_dominant)
         trg_dominant_logits = self.classifier(trg_dominant_feat)
 
-        # Unsupervised contrastive loss on target domain side
+        # Unsupervised contrastive loss on target domain side (có warmup khi dùng DINOv3)
         trg_con_loss = self.contrastive_loss(trg_orig_logits, trg_dominant_logits)
-        loss += trg_con_loss * round(self.hparams.trg_cont_weight, 2)
+        if self.dinov3_loss.trg_cont_scale(self.current_epoch) > 0:
+            loss += trg_con_loss * round(self.hparams.trg_cont_weight, 2)
 
+        # Source-mix CE + Diversity loss (bằng 0 khi không cấu hình)
+        addon_loss, extra_losses = self.dinov3_loss(src_dominant_logits, src_y, trg_orig_logits)
+        loss += addon_loss
 
         loss.backward()
         self.optimizer.step()
@@ -127,5 +136,6 @@ class CoTMix(Algorithm):
                 'src_cls_loss': src_cls_loss.item(),
                 'trg_entropy_loss': trg_entropy_loss.item(),
                 'src_supcon_loss': src_supcon_loss.item(),
-                'trg_con_loss': trg_con_loss.item()
+                'trg_con_loss': trg_con_loss.item(),
+                **extra_losses
                 }

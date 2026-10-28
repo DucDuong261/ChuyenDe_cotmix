@@ -1,7 +1,15 @@
 import os
+import sys
 import argparse
 import torch
 import warnings
+
+# configs/ và models/ nằm trong thư mục CoTMix/ sau khi sắp xếp lại dự án
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+COTMIX_DIR = os.path.join(BASE_DIR, "CoTMix")
+if os.path.isdir(COTMIX_DIR):
+    sys.path.insert(0, COTMIX_DIR)
+
 from trainer import cross_domain_trainer
 import sklearn.exceptions
 warnings.filterwarnings("ignore", category=sklearn.exceptions.UndefinedMetricWarning)
@@ -52,6 +60,7 @@ if __name__ == "__main__":
     else:
         trainer.train()
 
-save_path = "cotmix_uci_har.pkl"
+# Tên tệp theo backbone để bản DINOv3 không ghi đè mô hình CNN (export.py đọc cotmix_uci_har.pkl)
+save_path = "cotmix_uci_har.pkl" if args.backbone == "CNN" else "cotmix_uci_har_dinov3.pkl"
 torch.save(trainer.algorithm, save_path)
 print(f"Đã xuất mô hình thành công tại: {save_path}")

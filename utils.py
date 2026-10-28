@@ -115,18 +115,16 @@ def _calc_metrics(pred_labels, true_labels, log_dir, home_path, target_names):
 def copy_Files(destination):
     destination_dir = os.path.join(destination, "MODEL_BACKUP_FILES")
     os.makedirs(destination_dir, exist_ok=True)
-    copy("main.py", os.path.join(destination_dir, "main.py"))
-    copy("dataloader.py", os.path.join(destination_dir, "dataloader.py"))
-    copy(f"models/models.py", os.path.join(destination_dir, f"models.py"))
-    copy(f"models/loss.py", os.path.join(destination_dir, f"loss.py"))
-    if os.path.exists("models/dinov3.py"):
-        copy("models/dinov3.py", os.path.join(destination_dir, "dinov3.py"))
-    copy("algorithms.py", os.path.join(destination_dir, "algorithms.py"))
-    copy(f"configs/data_model_configs.py", os.path.join(destination_dir, f"data_model_configs.py"))
-    copy(f"configs/hparams.py", os.path.join(destination_dir, f"hparams.py"))
-    copy(f"configs/sweep_params.py", os.path.join(destination_dir, f"sweep_params.py"))
-    copy(f"trainer.py", os.path.join(destination_dir, f"trainer.py"))
-    copy("utils.py", os.path.join(destination_dir, "utils.py"))
+    base_dir = os.path.dirname(os.path.abspath(__file__))
+    files = ["main.py", "dataloader.py", "models/models.py", "models/loss.py", "models/dinov3.py", "models/dinov3_loss.py",
+             "algorithms.py", "configs/data_model_configs.py", "configs/hparams.py",
+             "configs/sweep_params.py", "trainer.py", "utils.py"]
+    for rel in files:
+        # Tệp có thể nằm ở thư mục gốc hoặc trong CoTMix/
+        src = next((p for p in (os.path.join(base_dir, rel), os.path.join(base_dir, "CoTMix", rel))
+                    if os.path.exists(p)), None)
+        if src is not None:
+            copy(src, os.path.join(destination_dir, os.path.basename(rel)))
 
 
 def get_dev_value(weight, error):

@@ -69,6 +69,7 @@ class cross_domain_trainer(object):
         if self.backbone == "DINOv3ViTS16":
             self.default_hparams["batch_size"] = args.batch_size
             self.default_hparams["num_epochs"] = args.epochs
+            self.default_hparams.update(getattr(self.hparams_class, "dinov3_overrides", {}))
 
     def sweep(self):
         # sweep configurations
@@ -127,11 +128,11 @@ class cross_domain_trainer(object):
                 algorithm.to(self.device)
 
                 # Average meters
-                loss_avg_meters = collections.defaultdict(lambda: AverageMeter())
-                
-
                 # training..
                 for epoch in range(1, self.hparams["num_epochs"] + 1):
+                    # Reset mỗi epoch để log là loss trung bình của riêng epoch đó
+                    loss_avg_meters = collections.defaultdict(lambda: AverageMeter())
+                    algorithm.current_epoch = epoch
                     joint_loaders = enumerate(zip(self.src_train_dl, self.trg_train_dl))
                     algorithm.train()
 
@@ -160,7 +161,8 @@ class cross_domain_trainer(object):
 
                 self.calc_results_per_run()
 
-        save_path = os.path.join(self.home_path, "cotmix_uci_har.pt")
+        # Lưu vào thư mục thí nghiệm, không ghi đè cotmix_uci_har.pt (TorchScript) mà app.py đang dùng
+        save_path = os.path.join(self.home_path, self.exp_log_dir, "last_model_state_dict.pt")
         torch.save(self.algorithm.state_dict(), save_path)
         print(f"Đã xuất mô hình thành công tại: {save_path}")
 
