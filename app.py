@@ -7,6 +7,7 @@ import html
 import time
 import random
 import tempfile
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FutureTimeout
 from datetime import datetime
 
 import gradio as gr
@@ -19,13 +20,26 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 sys.path.append(BASE_DIR)
 
 MODEL_PT_PATH = os.path.join(BASE_DIR, "cotmix_uci_har.pt")
-SAMPLES_PATH = os.path.join(BASE_DIR, "samples", "uci_har_test_samples.npz")
+SAMPLES_PATH = next(
+    (p for p in (
+        os.path.join(BASE_DIR, "samples", "uci_har_test_samples.npz"),
+        os.path.join(BASE_DIR, "CoTMix", "samples", "uci_har_test_samples.npz"),
+    ) if os.path.exists(p)),
+    os.path.join(BASE_DIR, "samples", "uci_har_test_samples.npz"),
+)
 EXPORT_DIR = os.path.join(tempfile.gettempdir(), "phonepose_exports")
 os.makedirs(EXPORT_DIR, exist_ok=True)
 device = torch.device("cpu")
 
 SEQ_LEN = 128
 SAMPLING_HZ = 50
+
+# Giới hạn tải tệp: tệp quá nặng hoặc đọc quá lâu sẽ bị từ chối
+MAX_FILE_MB = 10
+PARSE_TIMEOUT_S = 10
+# Chặn cứng ở tầng Gradio để không nhận tệp khổng lồ; ngưỡng 10 MB được kiểm tra trong on_upload
+HARD_UPLOAD_LIMIT = "50mb"
+PARSE_POOL = ThreadPoolExecutor(max_workers=2)
 
 # Thứ tự kênh giống prepare_uci_har_cotmix.py (đầu vào mô hình: 1 x 9 x 128)
 CHANNELS = [
@@ -252,6 +266,19 @@ def status_pill_html():
 
 def brand_html():
     return f'<div class="pp-brand">{LOGO_SVG}<span><b>Phone</b><i>Pose</i></span></div>'
+
+
+def upload_error_html(name, reason):
+    return f"""
+    <div class="pp-file error" role="alert">
+      <div class="pp-file-ico">{icon(ICON_ALERT, 22)}</div>
+      <div class="pp-file-meta">
+        <div class="pp-file-name" title="{esc(name)}">Không tải được tệp {esc(name)}</div>
+        <div class="pp-file-sub">{esc(reason)}</div>
+      </div>
+    </div>
+    <div class="pp-hint">{icon(ICON_INFO, 14)}<span>Hãy chọn tệp khác bằng nút <em>Chọn tệp</em> (tối đa {MAX_FILE_MB} MB, định dạng xem ở tab Chuẩn bị dữ liệu) hoặc dùng dữ liệu mẫu.</span></div>
+    """
 
 
 def file_card_html(cur):
@@ -665,12 +692,42 @@ def on_use_sample(choice, cur, channels):
     return render_data(rec, channels)
 
 
+def upload_failed(name, reason, channels):
+    """Báo lỗi, bỏ dữ liệu cũ và đưa giao diện về trạng thái chọn tệp."""
+    gr.Warning(f"Không tải được tệp {name}: {reason}", duration=8)
+    outputs = list(render_data(None, channels))
+    outputs[2] = upload_error_html(name, reason)
+    return tuple(outputs)
+
+
 def on_upload(file_obj, channels):
     path = file_obj if isinstance(file_obj, str) else getattr(file_obj, "name", "")
+    name = os.path.basename(path) or "tệp"
     try:
-        x, n_steps, notes = parse_signal_file(path)
+        size_mb = os.path.getsize(path) / (1024 * 1024)
+    except OSError:
+        return upload_failed(name, "Không truy cập được tệp vừa tải lên, hãy thử lại.", channels)
+    if size_mb > MAX_FILE_MB:
+        return upload_failed(
+            name,
+            f"Tệp nặng {size_mb:.1f} MB, vượt giới hạn {MAX_FILE_MB} MB. "
+            f"Chỉ cần {SEQ_LEN} mốc × 9 kênh, hãy cắt bớt tệp trước khi tải lên.",
+            channels,
+        )
+    future = PARSE_POOL.submit(parse_signal_file, path)
+    try:
+        x, n_steps, notes = future.result(timeout=PARSE_TIMEOUT_S)
+    except FutureTimeout:
+        future.cancel()
+        return upload_failed(
+            name,
+            f"Quá {PARSE_TIMEOUT_S} giây vẫn chưa đọc xong tệp (tệp quá lớn hoặc cấu trúc phức tạp).",
+            channels,
+        )
+    except UnicodeDecodeError:
+        return upload_failed(name, "Tệp không phải dạng văn bản UTF-8 (có thể là tệp nhị phân hoặc sai định dạng).", channels)
     except Exception as exc:
-        raise gr.Error(f"Không đọc được tệp: {exc}", duration=8)
+        return upload_failed(name, f"Sai định dạng — {exc}", channels)
     rec = {
         "x": x,
         "name": os.path.basename(path),
@@ -896,7 +953,12 @@ button.pp-nav:focus-visible, .gradio-container button:focus-visible { outline: 3
 .gradio-container button:disabled { opacity: .45 !important; cursor: not-allowed !important; box-shadow: none !important; }
 
 /* ---------- Input card ---------- */
-#pp-input-card { flex-wrap: wrap !important; }
+#pp-input-card { flex-wrap: wrap !important; scroll-margin-top: 96px; }
+.pp-file.error { border-color: #F3B4B7; background: var(--pp-danger-soft); animation: pp-shake .35s ease; }
+.pp-file.error .pp-file-ico { background: #fff; color: var(--pp-danger); }
+.pp-file.error .pp-file-name { color: var(--pp-danger); }
+.pp-file.error .pp-file-sub { color: #8A2A30; }
+@keyframes pp-shake { 25% { transform: translateX(-4px); } 75% { transform: translateX(4px); } }
 .pp-file { display: flex; align-items: center; gap: 14px; padding: 14px 16px; border: 1.5px dashed #B9D0F2; border-radius: 12px; background: #F9FBFF; }
 .pp-file.empty { border-color: var(--pp-border); }
 .pp-file-ico { width: 44px; height: 44px; border-radius: 10px; display: grid; place-items: center; background: var(--pp-primary-soft); color: var(--pp-primary); flex: none; }
@@ -1048,6 +1110,18 @@ FORCE_LIGHT_JS = """
 }
 """
 
+# Khi tải tệp lỗi: cuộn về khu vực chọn tệp và đặt focus vào nút "Chọn tệp"
+FOCUS_UPLOAD_ON_ERROR_JS = """
+() => {
+  if (!document.querySelector('#pp-input-card .pp-file.error')) return;
+  const card = document.getElementById('pp-input-card');
+  const reduce = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+  card?.scrollIntoView({ behavior: reduce ? 'auto' : 'smooth', block: 'start' });
+  const btn = document.getElementById('pp-upload-btn');
+  (btn?.tagName === 'BUTTON' ? btn : btn?.querySelector('button'))?.focus({ preventScroll: true });
+}
+"""
+
 HEAD = """
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -1120,6 +1194,7 @@ with gr.Blocks(title="PhonePose · Nhận diện tư thế từ cảm biến", *
                                 file_types=[".csv", ".txt", ".json", ".npy"],
                                 file_count="single",
                                 elem_classes=["pp-btn-ghost"],
+                                elem_id="pp-upload-btn",
                                 min_width=110,
                             )
                     with gr.Column(scale=7, min_width=300):
@@ -1194,7 +1269,9 @@ with gr.Blocks(title="PhonePose · Nhận diện tư thế từ cảm biến", *
     classify_outputs = [pred_state, pipeline, result, dist, rank, btn_export, history_state]
 
     btn_sample.click(on_use_sample, [sample_choice, current_state, channel_pick], data_outputs)
-    btn_upload.upload(on_upload, [btn_upload, channel_pick], data_outputs)
+    btn_upload.upload(on_upload, [btn_upload, channel_pick], data_outputs).then(
+        None, None, None, js=FOCUS_UPLOAD_ON_ERROR_JS
+    )
     btn_clear.click(on_clear, [channel_pick], data_outputs)
     channel_pick.change(on_channels, [current_state, channel_pick], wave_html, show_progress="hidden")
     for b in (btn_classify, btn_classify_top):
@@ -1212,4 +1289,9 @@ interface = demo
 
 if __name__ == "__main__":
     port = int(os.environ.get("PORT", 7860))
-    demo.launch(server_name="0.0.0.0", server_port=port, **(UI_KWARGS if GRADIO_6 else {}))
+    demo.launch(
+        server_name="0.0.0.0",
+        server_port=port,
+        max_file_size=HARD_UPLOAD_LIMIT,
+        **(UI_KWARGS if GRADIO_6 else {}),
+    )
