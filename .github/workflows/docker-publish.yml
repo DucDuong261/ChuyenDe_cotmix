@@ -1,0 +1,148 @@
+name: CI/CD
+
+on:
+  push:
+    branches: ["main"]
+    tags: ["v*"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+# Hủy lần chạy cũ khi có commit mới trên cùng nhánh/PR
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  # ---------------- CI: kiểm thử mã nguồn ----------------
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: actions/setup-python@v6
+        with:
+          python-version: "3.10"
+          cache: pip
+          cache-dependency-path: requirements-app.txt
+
+      - name: Cài thư viện
+        run: |
+          pip install torch --extra-index-url https://download.pytorch.org/whl/cpu
+          pip install -r requirements-app.txt pytest
+
+      - name: Kiểm tra cú pháp
+        run: python -m compileall -q app.py tests
+
+      - name: Chạy smoke test
+        run: pytest -q tests/
+
+  # ---------------- CD: build, test container, push image ----------------
+  docker:
+    needs: test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write   # cho phép push lên ghcr.io bằng GITHUB_TOKEN
+    env:
+      # Docker Hub là tuỳ chọn: đặt biến repo DOCKERHUB_USERNAME + secret DOCKERHUB_TOKEN để bật
+      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+      PUSH: ${{ github.event_name != 'pull_request' }}
+    steps:
+      - uses: actions/checkout@v5
+
+      - name: Tên image (ghcr bắt buộc chữ thường)
+        run: echo "GHCR_IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
+
+      - uses: docker/setup-buildx-action@v3
+
+      - name: Đăng nhập GHCR
+        if: env.PUSH == 'true'
+        uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Đăng nhập Docker Hub
+        if: env.PUSH == 'true' && env.DOCKERHUB_USERNAME != ''
+        uses: docker/login-action@v3
+        with:
+          username: ${{ env.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Tạo tag & label
+        id: meta
+        uses: docker/metadata-action@v5
+        with:
+          images: |
+            ${{ env.GHCR_IMAGE }}
+            ${{ env.DOCKERHUB_USERNAME != '' && format('{0}/cotmix-uci-har', env.DOCKERHUB_USERNAME) || '' }}
+          tags: |
+            type=raw,value=latest,enable={{is_default_branch}}
+            type=sha,prefix=sha-,format=short
+            type=semver,pattern={{version}}
+            type=semver,pattern={{major}}.{{minor}}
+            type=ref,event=pr
+
+      # Build 1 lần, nạp vào Docker local để test container trước khi push
+      - name: Build image
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          load: true
+          tags: cotmix-uci-har:ci
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+      - name: Smoke test container
+        run: |
+          docker run -d --name app -p 7860:7860 cotmix-uci-har:ci
+          for i in $(seq 1 30); do
+            if curl -fsS http://127.0.0.1:7860/ > /dev/null; then
+              echo "App phản hồi sau ${i}x2s"; docker logs app; exit 0
+            fi
+            sleep 2
+          done
+          echo "App không khởi động được"; docker logs app; exit 1
+
+      - name: Push image
+        if: env.PUSH == 'true'
+        id: push
+        uses: docker/build-push-action@v6
+        with:
+          context: .
+          push: true
+          tags: ${{ steps.meta.outputs.tags }}
+          labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+
+      - name: Tóm tắt
+        if: env.PUSH == 'true'
+        run: |
+          {
+            echo "### Image đã push"
+            echo '```'
+            echo "${{ steps.meta.outputs.tags }}"
+            echo '```'
+            echo "Digest: \`${{ steps.push.outputs.digest }}\`"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  # ---------------- Deploy (tuỳ chọn): kích hoạt Render Deploy Hook ----------------
+  deploy:
+    needs: docker
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      RENDER_DEPLOY_HOOK_URL: ${{ secrets.RENDER_DEPLOY_HOOK_URL }}
+    steps:
+      - name: Gọi Render deploy hook
+        if: env.RENDER_DEPLOY_HOOK_URL != ''
+        run: curl -fsS -X POST "$RENDER_DEPLOY_HOOK_URL" > /dev/null && echo "Đã kích hoạt deploy trên Render"
+
+      - name: Bỏ qua (chưa cấu hình secret)
+        if: env.RENDER_DEPLOY_HOOK_URL == ''
+        run: echo "Chưa có secret RENDER_DEPLOY_HOOK_URL, bỏ qua bước deploy."

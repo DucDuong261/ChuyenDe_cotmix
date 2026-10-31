@@ -1,0 +1,4 @@
+# Thư viện tối thiểu để chạy app.py (Docker image & CI).
+# torch bản CPU được cài riêng từ index của PyTorch (xem Dockerfile).
+gradio>=5,<7
+numpy

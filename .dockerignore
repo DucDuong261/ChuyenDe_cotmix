@@ -1,0 +1,8 @@
+# Dockerfile chỉ COPY app.py, cotmix_uci_har.pt, requirements-app.txt và CoTMix/samples/.
+# File này giữ build context nhỏ (thư mục CoTMix nặng ~800 MB).
+**
+
+!app.py
+!cotmix_uci_har.pt
+!requirements-app.txt
+!CoTMix/samples/
