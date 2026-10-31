@@ -21,9 +21,9 @@ jobs:
   test:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
-      - uses: actions/setup-python@v6
+      - uses: actions/setup-python@v7
         with:
           python-version: "3.10"
           cache: pip
@@ -48,20 +48,20 @@ jobs:
       contents: read
       packages: write   # cho phép push lên ghcr.io bằng GITHUB_TOKEN
     env:
-      # Docker Hub là tuỳ chọn: đặt biến repo DOCKERHUB_USERNAME + secret DOCKERHUB_TOKEN để bật
-      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME }}
+      # Docker Hub là tuỳ chọn: đặt DOCKERHUB_USERNAME (variable hoặc secret) + secret DOCKERHUB_TOKEN để bật
+      DOCKERHUB_USERNAME: ${{ vars.DOCKERHUB_USERNAME || secrets.DOCKERHUB_USERNAME }}
       PUSH: ${{ github.event_name != 'pull_request' }}
     steps:
-      - uses: actions/checkout@v5
+      - uses: actions/checkout@v7
 
       - name: Tên image (ghcr bắt buộc chữ thường)
         run: echo "GHCR_IMAGE=ghcr.io/${GITHUB_REPOSITORY,,}" >> "$GITHUB_ENV"
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
       - name: Đăng nhập GHCR
         if: env.PUSH == 'true'
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -69,14 +69,14 @@ jobs:
 
       - name: Đăng nhập Docker Hub
         if: env.PUSH == 'true' && env.DOCKERHUB_USERNAME != ''
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           username: ${{ env.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
       - name: Tạo tag & label
         id: meta
-        uses: docker/metadata-action@v5
+        uses: docker/metadata-action@v6
         with:
           images: |
             ${{ env.GHCR_IMAGE }}
@@ -90,7 +90,7 @@ jobs:
 
       # Build 1 lần, nạp vào Docker local để test container trước khi push
       - name: Build image
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           load: true
@@ -112,7 +112,7 @@ jobs:
       - name: Push image
         if: env.PUSH == 'true'
         id: push
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: .
           push: true
